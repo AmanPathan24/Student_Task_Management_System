@@ -1,59 +1,59 @@
-const { tasks } = require('../config/mockDb');
+const Task = require('../models/Task');
+
+// Map mongo task schema to match frontend format
+const mapTask = (t) => ({
+  id: t._id,
+  userId: t.userId,
+  title: t.title,
+  description: t.description,
+  dueDate: t.dueDate,
+  priority: t.priority,
+  status: t.status,
+  createdAt: t.createdAt
+});
 
 // Get all tasks for the logged-in student (with search, filter, sort)
-const getTasks = (req, res) => {
+const getTasks = async (req, res) => {
   try {
-    let studentTasks = tasks.filter(t => t.userId === req.userId);
-
     const { search, status, priority, sortBy } = req.query;
+    
+    // Base filter
+    const filter = { userId: req.userId };
 
     // Search by title or description
     if (search) {
-      const query = search.toLowerCase();
-      studentTasks = studentTasks.filter(
-        t => t.title.toLowerCase().includes(query) || (t.description && t.description.toLowerCase().includes(query))
-      );
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
     }
 
     // Filter by status
     if (status) {
-      studentTasks = studentTasks.filter(t => t.status === status);
+      filter.status = status;
     }
 
     // Filter by priority
     if (priority) {
-      studentTasks = studentTasks.filter(t => t.priority === priority);
+      filter.priority = priority;
     }
 
-    // Sort
+    // Sorting options
+    let sortOption = { createdAt: -1 };
     if (sortBy) {
       const [field, order] = sortBy.split(':');
-      studentTasks.sort((a, b) => {
-        let valA = a[field];
-        let valB = b[field];
-
-        if (field === 'dueDate' || field === 'createdAt') {
-          valA = new Date(valA || 0);
-          valB = new Date(valB || 0);
-        }
-
-        if (valA < valB) return order === 'desc' ? 1 : -1;
-        if (valA > valB) return order === 'desc' ? -1 : 1;
-        return 0;
-      });
-    } else {
-      // Default: newest tasks first
-      studentTasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      sortOption = { [field]: order === 'desc' ? -1 : 1 };
     }
 
-    res.json(studentTasks);
+    const studentTasks = await Task.find(filter).sort(sortOption);
+    res.json(studentTasks.map(mapTask));
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching tasks' });
   }
 };
 
 // Create a new task
-const createTask = (req, res) => {
+const createTask = async (req, res) => {
   try {
     const { title, description, dueDate, priority } = req.body;
 
@@ -61,62 +61,56 @@ const createTask = (req, res) => {
       return res.status(400).json({ message: 'Title is required' });
     }
 
-    const newTask = {
-      id: Date.now().toString(),
+    const newTask = await Task.create({
       userId: req.userId,
       title,
       description: description || '',
-      dueDate: dueDate || '',
+      dueDate: dueDate || null,
       priority: priority || 'medium',
-      status: 'pending',
-      createdAt: new Date()
-    };
+      status: 'pending'
+    });
 
-    tasks.push(newTask);
-    res.status(201).json(newTask);
+    res.status(201).json(mapTask(newTask));
   } catch (error) {
     res.status(500).json({ message: 'Server error creating task' });
   }
 };
 
 // Update a task
-const updateTask = (req, res) => {
+const updateTask = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, description, dueDate, priority, status } = req.body;
 
-    const taskIndex = tasks.findIndex(t => t.id === id && t.userId === req.userId);
-    if (taskIndex === -1) {
+    const task = await Task.findOne({ _id: id, userId: req.userId });
+    if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    const updatedTask = {
-      ...tasks[taskIndex],
-      title: title !== undefined ? title : tasks[taskIndex].title,
-      description: description !== undefined ? description : tasks[taskIndex].description,
-      dueDate: dueDate !== undefined ? dueDate : tasks[taskIndex].dueDate,
-      priority: priority !== undefined ? priority : tasks[taskIndex].priority,
-      status: status !== undefined ? status : tasks[taskIndex].status
-    };
+    // Update fields if provided
+    if (title !== undefined) task.title = title;
+    if (description !== undefined) task.description = description;
+    if (dueDate !== undefined) task.dueDate = dueDate || null;
+    if (priority !== undefined) task.priority = priority;
+    if (status !== undefined) task.status = status;
 
-    tasks[taskIndex] = updatedTask;
-    res.json(updatedTask);
+    await task.save();
+    res.json(mapTask(task));
   } catch (error) {
     res.status(500).json({ message: 'Server error updating task' });
   }
 };
 
 // Delete a task
-const deleteTask = (req, res) => {
+const deleteTask = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const taskIndex = tasks.findIndex(t => t.id === id && t.userId === req.userId);
-    if (taskIndex === -1) {
+    const task = await Task.findOneAndDelete({ _id: id, userId: req.userId });
+    if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    tasks.splice(taskIndex, 1);
     res.json({ message: 'Task deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Server error deleting task' });

@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { users } = require('../config/mockDb');
+const User = require('../models/User');
 
 // Register a new user
 const register = async (req, res) => {
@@ -11,35 +11,31 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const userExists = users.find(u => u.email === email);
+    const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    const newUser = {
-      id: Date.now().toString(),
+    const newUser = await User.create({
       name,
       email,
-      password: hashedPassword,
-      createdAt: new Date()
-    };
+      password: hashedPassword
+    });
 
-    users.push(newUser);
-
-    const token = jwt.sign({ id: newUser.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({
       token,
       user: {
-        id: newUser.id,
+        id: newUser._id,
         name: newUser.name,
         email: newUser.email
       }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during registration' });
   }
 };
 
@@ -52,7 +48,7 @@ const login = async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = users.find(u => u.email === email);
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -62,36 +58,36 @@ const login = async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       token,
       user: {
-        id: user.id,
+        id: user._id,
         name: user.name,
         email: user.email
       }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during login' });
   }
 };
 
 // Get current user profile
-const getProfile = (req, res) => {
+const getProfile = async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
+    const user = await User.findById(req.userId).select('-password');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
     res.json({
-      id: user.id,
+      id: user._id,
       name: user.name,
       email: user.email
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error fetching profile' });
   }
 };
 
